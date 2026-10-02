@@ -192,7 +192,7 @@ def cv_deviance(kodierungen, train, folds, alpha):
         m = fitte(kodierungen, tr, alpha)
         mu = predict(m, design(kodierungen, va), np.log(va["Exposure"].to_numpy()))
         werte.append(poisson_deviance(va["ClaimNb"], mu))
-    return np.mean(werte), np.std(werte) / np.sqrt(K_FOLDS)
+    return np.array(werte)
 
 
 def referenz_alpha(train):
@@ -204,17 +204,21 @@ def referenz_alpha(train):
 
 
 def vergleich(train, folds, alpha, kandidaten, basis=()):
-    basis_dev, _ = cv_deviance(list(basis), train, folds, alpha)
-    rows = []
+    basis_fold = cv_deviance(list(basis), train, folds, alpha)
+    rows, je_fold = [], []
     for k in kandidaten:
         kods = list(basis) + [k]
         m = fitte(kods, train, alpha)
-        dev, se = cv_deviance(kods, train, folds, alpha)
+        d = cv_deviance(kods, train, folds, alpha)
+        je_fold.append(d)
         rows.append({"Kodierung": k.name, "Parameter": len(m["beta"]) - 1 - sum(len(b.transform(train.iloc[:1])[0]) for b in basis),
-                     "CV-Deviance": dev, "± SE": se, "Verbesserung ggü. ohne": basis_dev - dev})
+                     "CV-Deviance": d.mean(), "Verbesserung ggü. ohne": basis_fold.mean() - d.mean()})
     t = pd.DataFrame(rows)
-    t["Abstand zur besten"] = t["CV-Deviance"] - t["CV-Deviance"].min()
-    return t, basis_dev
+    beste = je_fold[int(t["CV-Deviance"].idxmin())]
+    # Abstand je Fold gepaart: dieselben Folds für alle Kodierungen
+    t["Abstand zur besten"] = [(d - beste).mean() for d in je_fold]
+    t["± SE Abstand"] = [(d - beste).std(ddof=1) / np.sqrt(K_FOLDS) for d in je_fold]
+    return t, basis_fold.mean()
 
 
 def md(t, basis_dev):
@@ -264,7 +268,7 @@ def main():
         "# Teil 3 – Kodierung der Merkmale im GLM (automatisch erzeugt)",
         f"Erzeugt von `src/teil3_merkmale.py`. Nur Trainingsdaten, {K_FOLDS}-fache Kreuzvalidierung mit Folds nach "
         "Merkmalsprofil. Metrik: mittlere Poisson-Deviance pro Police auf dem jeweils ausgelassenen Fold "
-        "(kleiner ist besser), ± Standardfehler über die Folds. Negativ-Binomial-GLM mit Log-Link und Offset "
+        "(kleiner ist besser). „± SE Abstand“ = Standardfehler des Abstands zur besten Kodierung, gepaart über dieselben Folds; ein Abstand von weniger als etwa 2 SE ist nicht klar von der besten unterscheidbar. Negativ-Binomial-GLM mit Log-Link und Offset "
         f"log(Exposure); α für alle Vergleiche fest = {alpha:.4f} (geschätzt im Modell mit allen Merkmalen in "
         "10 Klassen). Klassen = ungefähr gleiche Exposure je Klasse, Grenzen aus den Trainingsdaten. "
         "Spline = natürlicher kubischer Regressionsspline mit FG Freiheitsgraden.",
