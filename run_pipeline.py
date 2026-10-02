@@ -10,6 +10,7 @@ from pathlib import Path
 SCHRITTE = [
     "src/teil1_datenuebersicht.py",
     "src/teil1_bereinigung.py",
+    "src/teil2_visualisierung.py",
 ]
 
 if __name__ == "__main__":
