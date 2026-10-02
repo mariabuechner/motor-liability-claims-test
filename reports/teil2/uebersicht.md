@@ -29,6 +29,30 @@ In den Frequenzplots: graue Balken = Exposure (rechte Achse), blaue Punkte = Fre
 
 ![frequenz_exposure.png](frequenz_exposure.png)
 
+## T2.6 Frequenz nach Versicherungsdauer innerhalb von Teilgruppen
+
+| Exposure_Klasse | alle | BonusMalus = 50 | BonusMalus > 50 | DrivAge 30–60 | BonusMalus = 50, DrivAge 30–60, Area C/D |
+|---|---|---|---|---|---|
+| (0.0, 0.1] | 0.1723 | 0.1420 | 0.1978 | 0.1580 | 0.1568 |
+| (0.1, 0.25] | 0.1227 | 0.0940 | 0.1511 | 0.1096 | 0.0948 |
+| (0.25, 0.5] | 0.0970 | 0.0765 | 0.1179 | 0.0915 | 0.0814 |
+| (0.5, 0.75] | 0.0805 | 0.0617 | 0.1042 | 0.0774 | 0.0644 |
+| (0.75, 0.99] | 0.0747 | 0.0555 | 0.1010 | 0.0729 | 0.0570 |
+| (0.99, 1.0] | 0.0548 | 0.0371 | 0.1026 | 0.0547 | 0.0400 |
+
+## T2.7 Beobachtete vs. erwartete Schäden je Versicherungsdauer
+
+Erwartet = Frequenz der Zelle DrivAge-Band × BonusMalus-Band × Area mal Exposure, d. h. unter der Annahme, dass Schäden proportional zur Dauer sind. Werte > 1: mehr Schäden als bei Proportionalität.
+
+| Exposure_Klasse | beobachtet | erwartet | beobachtet/erwartet |
+|---|---|---|---|
+| (0.0, 0.1] | 1,297 | 647 | 2.006 |
+| (0.1, 0.25] | 2,139 | 1,482 | 1.444 |
+| (0.25, 0.5] | 4,985 | 4,376 | 1.139 |
+| (0.5, 0.75] | 4,713 | 4,723 | 0.998 |
+| (0.75, 0.99] | 4,037 | 4,236 | 0.953 |
+| (0.99, 1.0] | 9,212 | 10,919 | 0.844 |
+
 ## Frequenz je Merkmal
 
 ### P2.2 Numerische Merkmale

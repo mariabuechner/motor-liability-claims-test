@@ -148,6 +148,53 @@ def nach_exposure(freq):
     return g.loc[[str(c) for c in klassen.cat.categories]]
 
 
+EXPOSURE_KLASSEN = [0, 0.1, 0.25, 0.5, 0.75, 0.99, 1.0]
+
+
+def exposure_innerhalb_gruppen(freq):
+    """Frequenz je Exposure-Klasse innerhalb von Teilgruppen.
+
+    Prüft, ob der Zusammenhang Frequenz ↔ Versicherungsdauer nur daher kommt,
+    dass kurz versicherte Policen andere Merkmale haben.
+    """
+    ek = pd.cut(freq["Exposure"], EXPOSURE_KLASSEN).astype(str)
+    gruppen = {
+        "alle": pd.Series(True, index=freq.index),
+        "BonusMalus = 50": freq["BonusMalus"] == 50,
+        "BonusMalus > 50": freq["BonusMalus"] > 50,
+        "DrivAge 30–60": freq["DrivAge"].between(30, 60),
+        "BonusMalus = 50, DrivAge 30–60, Area C/D": (freq["BonusMalus"] == 50)
+        & freq["DrivAge"].between(30, 60)
+        & freq["Area"].isin(["C", "D"]),
+    }
+    spalten = {}
+    for name, m in gruppen.items():
+        d = freq[m]
+        spalten[name] = d.groupby(ek[m])["ClaimNb"].sum() / d.groupby(ek[m])["Exposure"].sum()
+    order = [str(c) for c in pd.cut(freq["Exposure"], EXPOSURE_KLASSEN).cat.categories]
+    return pd.DataFrame(spalten).loc[order].rename_axis("Exposure_Klasse")
+
+
+def exposure_beobachtet_erwartet(freq):
+    """Beobachtete vs. erwartete Schäden je Exposure-Klasse.
+
+    Erwartet = Frequenz der Zelle (DrivAge-Band × BonusMalus-Band × Area) mal Exposure,
+    also unter der Annahme, dass Schäden proportional zur Dauer sind. Die Bänder dienen
+    nur dieser Prüfung und sind keine Modellgruppierung.
+    """
+    da = pd.cut(freq["DrivAge"], [17, 21, 25, 30, 40, 50, 60, 70, 101])
+    bm = pd.cut(freq["BonusMalus"], [49, 50, 60, 80, 100, 300])
+    keys = [da, bm, freq["Area"]]
+    rate = freq.groupby(keys, observed=True)["ClaimNb"].transform("sum") / freq.groupby(keys, observed=True)[
+        "Exposure"
+    ].transform("sum")
+    ek = pd.cut(freq["Exposure"], EXPOSURE_KLASSEN)
+    r = pd.DataFrame({"beobachtet": freq["ClaimNb"], "erwartet": rate * freq["Exposure"]}).groupby(ek, observed=True).sum()
+    r["beobachtet/erwartet"] = r["beobachtet"] / r["erwartet"]
+    r.index = r.index.astype(str)
+    return r.rename_axis("Exposure_Klasse")
+
+
 def density_klassen(freq):
     """Klassen mit ungefähr gleicher Exposure; dargestellt am Exposure-gewichteten Median."""
     order = freq.sort_values("Density")
@@ -239,6 +286,14 @@ def main():
     fig, ax = plt.subplots(figsize=(10, 4.5))
     plot_frequenz(ax, g, gesamt, "Frequenz nach Versicherungsdauer (Exposure-Klasse)", x=np.arange(len(g)), labels=list(g.index))
     sections += ["### P2.1 Frequenz nach Versicherungsdauer", savefig(fig, "frequenz_exposure.png")]
+    sections += [
+        "## T2.6 Frequenz nach Versicherungsdauer innerhalb von Teilgruppen",
+        md_table(exposure_innerhalb_gruppen(freq), {c: "{:.4f}" for c in exposure_innerhalb_gruppen(freq).columns}),
+        "## T2.7 Beobachtete vs. erwartete Schäden je Versicherungsdauer",
+        "Erwartet = Frequenz der Zelle DrivAge-Band × BonusMalus-Band × Area mal Exposure, d. h. unter der "
+        "Annahme, dass Schäden proportional zur Dauer sind. Werte > 1: mehr Schäden als bei Proportionalität.",
+        md_table(exposure_beobachtet_erwartet(freq), {"beobachtet/erwartet": "{:.3f}", "erwartet": "{:,.0f}"}),
+    ]
 
     # P2.2 numerische Merkmale
     fig, axes = plt.subplots(len(EINZELWERTE) + 1, 1, figsize=(12, 4.2 * (len(EINZELWERTE) + 1)))
