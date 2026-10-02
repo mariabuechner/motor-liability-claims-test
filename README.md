@@ -12,7 +12,7 @@ Studierendenprojekt: Tarifmodell für eine Motorfahrzeug-Haftpflichtversicherung
 
 ```bash
 pip install -r requirements.txt
-# [Befehl für die Pipeline inkl. Erzeugung des Dashboards – von der Gruppe zu ergänzen]
+python run_pipeline.py
 ```
 
 ## Dashboard
