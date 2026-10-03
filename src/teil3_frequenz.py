@@ -14,7 +14,7 @@ Aufruf:
     python src/teil3_frequenz.py
 """
 
-import pickle
+import json
 import sys
 from pathlib import Path
 
@@ -202,6 +202,40 @@ def faktoren_kategorial(modell, kods):
     return pd.DataFrame(rows)
 
 
+def tarif_export(modell, kods, train, roh, grenzen):
+    """Beitrag jedes Merkmalswerts zum linearen Prädiktor (log-Skala), für das Dashboard.
+
+    Für jedes Merkmal: Beitrag je möglichem Rohwert (stetige Merkmale nach Kappung) und das
+    Exposure-gewichtete Mittel im Training (Vergleich mit dem Portfolio).
+    """
+    out = {"achsenabschnitt": float(modell["beta"][0]), "alpha": float(modell["alpha"]), "kappung": grenzen,
+           "merkmale": {}}
+    pos = 1
+    for k in kods:
+        n = len(k.transform(train.iloc[[0]])[0])
+        b = modell["beta"][pos:pos + n]
+        mittel = float(np.average(k.transform(train) @ b, weights=train["Exposure"]))
+        eintrag = {"kodierung": k.name, "mittel": mittel}
+        if isinstance(k, Log):
+            eintrag.update(typ="log", koeffizient=float(b[0]), verschiebung=k.shift)
+        elif isinstance(k, Linear):
+            eintrag.update(typ="linear", koeffizient=float(b[0]))
+        else:
+            if isinstance(k, Spline):
+                werte = np.arange(roh[k.col].min(), roh[k.col].max() + 1)
+                x = pd.DataFrame({k.col: np.minimum(werte, grenzen.get(k.col, werte.max()))})
+            else:
+                werte = np.array(sorted(roh[k.col].unique()) if k.col in roh else sorted(train[k.col].unique()))
+                x = pd.DataFrame({k.col: werte})
+            beitrag = k.transform(x) @ b
+            eintrag.update(typ="tabelle", werte={str(w): float(v) for w, v in zip(werte, beitrag)})
+            if isinstance(k, Gruppiert):
+                eintrag["gruppen"] = {str(r): g for r, g in k.map.items()}
+        out["merkmale"][k.col] = eintrag
+        pos += n
+    return out
+
+
 def plot_stetig(modell, kods, train, pfad):
     stetig = [k for k in kods if isinstance(k, (Spline, Log, Linear))]
     fig, axes = plt.subplots(len(stetig), 1, figsize=(9, 3.4 * len(stetig)))
@@ -243,6 +277,7 @@ def plot_stetig(modell, kods, train, pfad):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     freq = lade_mit_split()
+    roh_freq = freq.copy()
     roh_train = freq[~freq["Test"]]
     grenzen = kappungsgrenzen(roh_train)
     freq = vorbereiten(freq, grenzen)
@@ -346,9 +381,9 @@ def main():
     fak = {v: faktoren_kategorial(glm[v]["modell"], glm[v]["kods"]) for v in ["a", "b"]}
     zuordnung = pd.Series(glm["b"]["kods"][-2].map, name="Gruppe") if isinstance(glm["b"]["kods"][-2], Gruppiert) else None
 
-    with open(PROCESSED / "modelle_frequenz.pkl", "wb") as fh:
-        pickle.dump({"grenzen": grenzen, "glm": glm, "gbm": gbm, "gbm_kategorien": kategorien,
-                     "exposure_grenzen": EXPOSURE_GRENZEN}, fh)
+    for v in ["a", "b"]:
+        export = tarif_export(glm[v]["modell"], glm[v]["kods"], train, roh_freq, grenzen)
+        (PROCESSED / f"tarif_frequenz_glm_{v}.json").write_text(json.dumps(export, indent=1), encoding="utf-8")
 
     fmt_test = {c: "{:.6f}" for c in t_test.columns}
     fmt_test.update({"beobachtet/vorhergesagt": "{:.3f}", "beob./vorh., nur volle Jahre": "{:.3f}"})
