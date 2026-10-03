@@ -13,6 +13,7 @@ SCHRITTE = [
     "src/teil2_visualisierung.py",
     "src/teil3_grundlagen.py",
     "src/teil3_merkmale.py",
+    "src/teil3_frequenz.py",
 ]
 
 if __name__ == "__main__":
