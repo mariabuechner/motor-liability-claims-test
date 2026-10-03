@@ -74,6 +74,28 @@ def basis_kodierung():
     ]
 
 
+def bm_haeufig_je_wert(schwelle):
+    """BonusMalus-Werte mit mindestens `schwelle` Exposure-Anteil je eigene Kategorie, übrige = „selten“."""
+
+    def f(df):
+        e = df.groupby("BonusMalus")["Exposure"].sum()
+        anteil = e / e.sum()
+        return {b: (str(b) if anteil.get(b, 0) >= schwelle else "selten") for b in range(50, 231)}
+
+    return f
+
+
+def bm_selten(schwelle):
+    """Nur ein Indikator: BonusMalus-Wert mit weniger als `schwelle` Exposure-Anteil."""
+
+    def f(df):
+        e = df.groupby("BonusMalus")["Exposure"].sum()
+        anteil = e / e.sum()
+        return {b: ("selten" if anteil.get(b, 0) < schwelle else "häufig") for b in range(50, 231)}
+
+    return f
+
+
 def region_bereinigt(k, alpha):
     """Regionen nach ihrem Effekt *zusätzlich zu log(Density)* sortiert, dann k Gruppen gleicher Exposure."""
 
@@ -216,12 +238,13 @@ def tarif_export(modell, kods, train, roh, grenzen):
         b = modell["beta"][pos:pos + n]
         mittel = float(np.average(k.transform(train) @ b, weights=train["Exposure"]))
         eintrag = {"kodierung": k.name, "mittel": mittel}
+        vorher = out["merkmale"].get(k.col)
         if isinstance(k, Log):
             eintrag.update(typ="log", koeffizient=float(b[0]), verschiebung=k.shift)
         elif isinstance(k, Linear):
             eintrag.update(typ="linear", koeffizient=float(b[0]))
         else:
-            if isinstance(k, Spline):
+            if isinstance(k, Spline) or k.col in grenzen:
                 werte = np.arange(roh[k.col].min(), roh[k.col].max() + 1)
                 x = pd.DataFrame({k.col: np.minimum(werte, grenzen.get(k.col, werte.max()))})
             else:
@@ -231,6 +254,13 @@ def tarif_export(modell, kods, train, roh, grenzen):
             eintrag.update(typ="tabelle", werte={str(w): float(v) for w, v in zip(werte, beitrag)})
             if isinstance(k, Gruppiert):
                 eintrag["gruppen"] = {str(r): g for r, g in k.map.items()}
+        if vorher is not None:
+            # zweiter Baustein desselben Merkmals: Beiträge je Wert addieren
+            assert vorher["typ"] == "tabelle" and eintrag["typ"] == "tabelle"
+            vorher["werte"] = {w: v + eintrag["werte"].get(w, 0.0) for w, v in vorher["werte"].items()}
+            vorher["mittel"] += eintrag["mittel"]
+            vorher["kodierung"] += " + " + eintrag["kodierung"]
+            eintrag = vorher
         out["merkmale"][k.col] = eintrag
         pos += n
     return out
@@ -312,8 +342,19 @@ def main():
     t_reg, wahl_reg = cv_vergleich({n: (lambda b=b: basis_kodierung() + mit_vp() + [b()]) for n, b in reg.items()},
                                    train, folds, alpha0)
 
+    print("Auswahl Zusatzkodierung BonusMalus")
+    bm = {
+        "nur Spline": lambda: [],
+        "+ Indikator seltener Wert (< 1 % Exposure)": lambda: [Gruppiert("BonusMalus", "selten 1 %", bm_selten(0.01))],
+        "+ häufige Werte (≥ 0.5 %) je Wert, Rest selten": lambda: [Gruppiert("BonusMalus", "je Wert ≥ 0.5 %", bm_haeufig_je_wert(0.005))],
+        "+ häufige Werte (≥ 0.2 %) je Wert, Rest selten": lambda: [Gruppiert("BonusMalus", "je Wert ≥ 0.2 %", bm_haeufig_je_wert(0.002))],
+        "+ jeder Wert eigene Kategorie": lambda: [Kategorie("BonusMalus", "jeder Wert")],
+    }
+    t_bm, wahl_bm = cv_vergleich({n: (lambda b=b: basis_kodierung() + mit_vp() + [reg[wahl_reg]()] + b()) for n, b in bm.items()},
+                                 train, folds, alpha0)
+
     def kodierung(variante):
-        kods = basis_kodierung() + mit_vp() + [reg[wahl_reg]()]
+        kods = basis_kodierung() + mit_vp() + [reg[wahl_reg]()] + bm[wahl_bm]()
         if variante == "b":
             kods.append(Kategorie("ExpKlasse"))
         return kods
@@ -379,7 +420,8 @@ def main():
     for v in ["a", "b"]:
         plot_stetig(glm[v]["modell"], glm[v]["kods"], train, OUT / f"glm_{v}_stetig.png")
     fak = {v: faktoren_kategorial(glm[v]["modell"], glm[v]["kods"]) for v in ["a", "b"]}
-    zuordnung = pd.Series(glm["b"]["kods"][-2].map, name="Gruppe") if isinstance(glm["b"]["kods"][-2], Gruppiert) else None
+    reg_kod = [k for k in glm["b"]["kods"] if k.col == "Region"][0]
+    zuordnung = pd.Series(reg_kod.map, name="Gruppe") if isinstance(reg_kod, Gruppiert) else None
 
     for v in ["a", "b"]:
         export = tarif_export(glm[v]["modell"], glm[v]["kods"], train, roh_freq, grenzen)
@@ -405,6 +447,10 @@ def main():
         z = zuordnung.to_frame().assign(Region=lambda d: d.index).groupby("Gruppe")["Region"].apply(lambda s: ", ".join(sorted(s)))
         sections += ["Zuordnung der gewählten Gruppierung (Training):", md_table(z.to_frame())]
     sections += [
+        "## F3.3b Auswahl Zusatzkodierung BonusMalus (volles GLM)",
+        "Hintergrund: Häufige BonusMalus-Werte haben eine tiefere Frequenz als seltene Werte dazwischen (Teil 2, P2.2), "
+        "was ein glatter Spline nicht abbilden kann.",
+        md_table(t_bm, {"Parameter": "{:d}"}),
         "## F3.4 Gradient Boosting: Tuning",
         f"Lernrate {GBM_LERNRATE}, Poisson-Verlust, Iterationen per Kreuzvalidierung gewählt.",
         "### Variante a", md_table(gbm_tabellen["a"], index=False),
